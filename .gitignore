@@ -1,0 +1,6 @@
+.venv/
+langextract_env/
+__pycache__/
+*.pyc
+.env
+output/
