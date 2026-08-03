@@ -36,8 +36,11 @@ source langextract_env/bin/activate  # Linux/Mac
 pip install langextract pdfplumber python-dotenv
 
 # Set up API key (get one at https://aistudio.google.com/app/apikey)
-echo 'GOOGLE_API_KEY=your-key-here' > .env
+cp .env.example .env
+# then edit .env and add your GOOGLE_API_KEY
 ```
+
+See [`.env.example`](.env.example) for all supported environment variables (Gemini, optional OpenAI, optional local Ollama URL).
 
 ## Quick start
 
