@@ -35,7 +35,6 @@ EXAMPLES:
 """
 
 import argparse
-import json
 import os
 import sys
 import textwrap
@@ -45,7 +44,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils import (
     load_config, extract_pdf_text, configure_model,
-    ensure_output_dir, generate_html_report,
+    ensure_output_dir, generate_html_report, extract_with_backoff,
+    save_checkpoint,
 )
 
 load_config()
@@ -301,14 +301,27 @@ def extract_regulation(
     ]
 
     all_extractions = []
+    failed_groups = []
+
+    # Report is built incrementally and checkpointed to disk after every group,
+    # so a fatal error partway through (e.g. group C fails) doesn't discard
+    # results already extracted from groups A/B.
+    report_path = os.path.join(output_dir, f"{base_name}_report.json")
+    report = {
+        "source_file": os.path.basename(pdf_path),
+        "full_path": os.path.abspath(pdf_path),
+        "status": "in_progress",
+        "entities": {},
+    }
 
     for group in groups:
         print(f"   📋 Group {group['name']}...")
         group_result = None
+        group_error = None
 
         for attempt_chunk in [chunk_size, max(1000, chunk_size // 2), 1000]:
             try:
-                group_result = lx.extract(
+                group_result = extract_with_backoff(
                     text_or_documents=text,
                     prompt_description=group["prompt"],
                     examples=[group["example"]],
@@ -328,45 +341,47 @@ def extract_regulation(
                     print(f"      ⚠️  JSON error (chunk={attempt_chunk}), retrying smaller...")
                     continue
                 else:
+                    group_error = str(e)
                     print(f"\n   ❌ Extraction error in group {group['name']}: {e}")
-                    print("\n   Check: API key set? Model exists? Internet connected?")
-                    sys.exit(1)
+                    break
 
         if group_result is None:
-            print(f"   ⚠️  Group {group['name']} failed all attempts, skipping.")
+            reason = group_error or "failed all chunk-size attempts"
+            print(f"   ⚠️  Group {group['name']} failed ({reason}), skipping.")
+            failed_groups.append({"group": group["name"], "error": reason})
+            save_checkpoint(report, report_path)
             continue
 
         # Collect extractions from this group
         if hasattr(group_result, "extractions") and group_result.extractions:
             count = len(group_result.extractions)
             all_extractions.extend(group_result.extractions)
+            for ext in group_result.extractions:
+                report["entities"].setdefault(ext.extraction_class, []).append(
+                    ext.extraction_text
+                )
             print(f"      ✅ {count} entities found")
         else:
             print(f"      ⚠️  No entities found")
 
+        # Checkpoint after every group so progress survives a later failure.
+        save_checkpoint(report, report_path)
+
     if not all_extractions:
         print("\n   ❌ No entities extracted from any group.")
+        print("   Check: API key set? Model exists? Internet connected?")
         sys.exit(1)
 
     # 5. Save outputs
     print(f"\n4️⃣  Saving results to {output_dir}/")
 
-    # Build report from merged extractions
-    report = {
-        "source_file": os.path.basename(pdf_path),
-        "full_path": os.path.abspath(pdf_path),
-        "entities": {},
-    }
-    for ext in all_extractions:
-        report["entities"].setdefault(ext.extraction_class, []).append(
-            ext.extraction_text
-        )
-
-    # Save JSON report (the primary output — does not depend on LangExtract I/O)
-    report_path = os.path.join(output_dir, f"{base_name}_report.json")
-    ensure_output_dir(report_path)
-    with open(report_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+    report["status"] = "partial" if failed_groups else "complete"
+    if failed_groups:
+        report["failed_groups"] = failed_groups
+    save_checkpoint(report, report_path)
+    if failed_groups:
+        print(f"   ⚠️  Partial result: {len(failed_groups)}/{len(groups)} group(s) failed "
+              f"— see 'failed_groups' in the report. Re-run to retry.")
 
     # Generate HTML visualization
     html_path = os.path.join(output_dir, f"{base_name}_report.html")

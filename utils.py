@@ -9,8 +9,11 @@ Provides:
 - Processing time estimation
 """
 
+import json
 import os
+import random
 import re
+import time
 from pathlib import Path
 
 import pdfplumber
@@ -69,6 +72,54 @@ def configure_model(model_str: str) -> dict:
         config["model_id"] = model_str  # Gemini (default)
 
     return config
+
+
+# ============================================================
+# Rate-limit retry with exponential backoff
+# ============================================================
+
+# Substrings identifying a rate-limit / quota response (Gemini 429 RESOURCE_EXHAUSTED,
+# OpenAI 429, Ollama has no quota so this never fires for it).
+_RATE_LIMIT_MARKERS = ["429", "RESOURCE_EXHAUSTED", "rate limit", "quota"]
+
+
+def is_rate_limit_error(exc: Exception) -> bool:
+    """Check whether an exception from lx.extract() represents a rate-limit response."""
+    err_str = str(exc)
+    return any(marker.lower() in err_str.lower() for marker in _RATE_LIMIT_MARKERS)
+
+
+def extract_with_backoff(*, max_retries: int = 5, base_delay: float = 5.0, **extract_kwargs):
+    """
+    Call lx.extract() with exponential backoff + jitter on rate-limit errors.
+
+    Non-rate-limit errors (e.g. JSON parse failures) are re-raised immediately so
+    callers can keep handling those with their own chunk-size retry logic.
+    """
+    attempt = 0
+    while True:
+        try:
+            return lx.extract(**extract_kwargs)
+        except Exception as e:
+            if not is_rate_limit_error(e) or attempt >= max_retries:
+                raise
+            delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+            print(f"      ⏳ Rate limited (attempt {attempt + 1}/{max_retries}), waiting {delay:.0f}s...")
+            time.sleep(delay)
+            attempt += 1
+
+
+def save_checkpoint(report: dict, report_path: str) -> None:
+    """
+    Write the report dict to disk immediately, so that if a later extraction
+    group/document fails, results already gathered are not lost.
+
+    Safe to call repeatedly (e.g. after every group) — each call overwrites
+    the same file with the latest accumulated state.
+    """
+    ensure_output_dir(report_path)
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
 
 
 # ============================================================

@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils import (
     load_config, extract_pdf_text, configure_model,
     print_extraction_plan, ensure_output_dir, safe_save_documents,
-    generate_html_report,
+    generate_html_report, extract_with_backoff,
 )
 
 load_config()
@@ -267,7 +267,7 @@ def extract_quarterly(
 
     for attempt in attempts:
         try:
-            result = lx.extract(
+            result = extract_with_backoff(
                 text_or_documents=text,
                 prompt_description=PROMPT_QUARTERLY,
                 examples=[EXAMPLE_QUARTERLY],

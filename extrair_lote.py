@@ -27,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from utils import load_config, extract_pdf_text, configure_model, ensure_output_dir, generate_html_report
+from utils import load_config, extract_pdf_text, configure_model, ensure_output_dir, generate_html_report, extract_with_backoff, save_checkpoint
 
 load_config()
 
@@ -142,12 +142,27 @@ def process_document(
 
         config = configure_model(model)
         all_extractions = []
+        failed_groups = []
+
+        # Report is built incrementally and checkpointed after every group, so a
+        # fatal error partway through a multi-group document doesn't discard
+        # results already extracted from earlier groups.
+        sub_dir = os.path.join(output_dir, base_name)
+        report_path = os.path.join(sub_dir, f"{base_name}_report.json")
+        report = {
+            "source_file": os.path.basename(pdf_path),
+            "full_path": os.path.abspath(pdf_path),
+            "document_type": doc_type,
+            "status": "in_progress",
+            "entities": {},
+        }
 
         for group in extraction_groups:
             group_result = None
+            group_error = None
             for attempt_chunk in [chunk_size, max(1000, chunk_size // 2), 1000]:
                 try:
-                    group_result = lx.extract(
+                    group_result = extract_with_backoff(
                         text_or_documents=text,
                         prompt_description=group["prompt"],
                         examples=[group["example"]],
@@ -165,34 +180,32 @@ def process_document(
                     ])
                     if is_json_error and attempt_chunk > 1000:
                         continue
-                    raise
+                    group_error = str(e)
+                    break
 
-            if group_result and hasattr(group_result, "extractions") and group_result.extractions:
+            if group_result is None:
+                failed_groups.append({"group": group["prompt"][:40], "error": group_error or "failed all chunk-size attempts"})
+                save_checkpoint(report, report_path)
+                continue
+
+            if hasattr(group_result, "extractions") and group_result.extractions:
                 all_extractions.extend(group_result.extractions)
+                for ext in group_result.extractions:
+                    report["entities"].setdefault(ext.extraction_class, []).append(ext.extraction_text)
+
+            save_checkpoint(report, report_path)
 
         if not all_extractions:
             raise RuntimeError("No entities extracted from any group")
-
-        # Build report from merged extractions
-        sub_dir = os.path.join(output_dir, base_name)
-
-        report = {
-            "source_file": os.path.basename(pdf_path),
-            "full_path": os.path.abspath(pdf_path),
-            "document_type": doc_type,
-            "entities": {},
-        }
-        for ext in all_extractions:
-            report["entities"].setdefault(ext.extraction_class, []).append(ext.extraction_text)
 
         # Add alerts for quarterly reports
         if not doc_type.startswith("regulation"):
             report["alerts"] = classify_alerts(report)
 
-        report_path = os.path.join(sub_dir, f"{base_name}_report.json")
-        ensure_output_dir(report_path)
-        with open(report_path, "w", encoding="utf-8") as f:
-            json.dump(report, f, ensure_ascii=False, indent=2)
+        report["status"] = "partial" if failed_groups else "complete"
+        if failed_groups:
+            report["failed_groups"] = failed_groups
+        save_checkpoint(report, report_path)
 
         # Generate HTML visualization
         html_path = os.path.join(sub_dir, f"{base_name}_report.html")
@@ -201,10 +214,11 @@ def process_document(
         except Exception:
             pass
 
-        meta["status"] = "success"
+        meta["status"] = "partial" if failed_groups else "success"
         meta["entity_count"] = sum(len(v) for v in report.get("entities", {}).values())
         meta["alerts"] = report.get("alerts", [])
         meta["output_dir"] = sub_dir
+        meta["failed_groups"] = failed_groups
 
     except Exception as e:
         meta["status"] = "error"
@@ -223,7 +237,7 @@ def generate_comparative_report(results, output_dir):
     """Generate a comparative report across multiple documents."""
     fund_data = []
     for r in results:
-        if r["status"] != "success":
+        if r["status"] not in ("success", "partial"):
             continue
         base_name = Path(r["file"]).stem
         report_path = os.path.join(r.get("output_dir", ""), f"{base_name}_report.json")
@@ -351,6 +365,9 @@ def process_batch(
             print(f"   ✅ {r['type']} | {r['entity_count']} entities | {dt:.1f}s")
             if r.get("alerts"):
                 print(f"   🚨 {len(r['alerts'])} alert(s)")
+        elif r["status"] == "partial":
+            print(f"   ⚠️  {r['type']} | {r['entity_count']} entities | "
+                  f"{len(r['failed_groups'])} group(s) failed | {dt:.1f}s")
         else:
             print(f"   ❌ {r['error']}")
         results.append(r)
@@ -364,6 +381,7 @@ def process_batch(
         "timestamp": datetime.now().isoformat(), "model": model,
         "total": len(pdfs),
         "success": sum(1 for r in results if r["status"] == "success"),
+        "partial": sum(1 for r in results if r["status"] == "partial"),
         "errors": sum(1 for r in results if r["status"] == "error"),
         "total_time_sec": round(time.time() - start, 1),
         "results": results,
