@@ -107,7 +107,7 @@ All scripts share these options:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model` | `gemini-2.0-flash` | LLM model (`gemini-2.0-flash`, `gpt-4o`, `ollama:model`) |
+| `--model` | `gemini-2.5-flash` | LLM model (`gemini-2.5-flash`, `gpt-4o`, `ollama:model`) |
 | `--passes` | `1` | Extraction passes (2 = higher recall, 2× slower) |
 | `--workers` | `3` | Parallel workers (keep at 3 for free tier, increase for paid) |
 | `--output` | `output` | Output directory |

@@ -228,7 +228,7 @@ def build_report(result, pdf_path: str) -> dict:
 
 def extract_regulation(
     pdf_path: str,
-    model: str = "gemini-2.0-flash",
+    model: str = "gemini-2.5-flash",
     passes: int = 1,
     workers: int = 3,
     output_dir: str = "output",
@@ -431,8 +431,8 @@ if __name__ == "__main__":
         """),
     )
     parser.add_argument("pdf", help="Path to the regulation PDF")
-    parser.add_argument("--model", default="gemini-2.0-flash",
-                        help="LLM model (default: gemini-2.0-flash)")
+    parser.add_argument("--model", default="gemini-2.5-flash",
+                        help="LLM model (default: gemini-2.5-flash)")
     parser.add_argument("--passes", type=int, default=1,
                         help="Extraction passes (default: 1)")
     parser.add_argument("--workers", type=int, default=3,

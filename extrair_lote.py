@@ -93,7 +93,7 @@ def detect_type_from_filename(name: str) -> str:
 
 
 def process_document(
-    pdf_path, forced_type=None, model="gemini-2.0-flash",
+    pdf_path, forced_type=None, model="gemini-2.5-flash",
     passes=1, workers=3, output_dir="output", chunk_size=3000, max_chars=50000,
 ):
     """Process a single document and return metadata dict."""
@@ -331,7 +331,7 @@ def collect_pdfs(paths):
 
 
 def process_batch(
-    paths, doc_type="auto", model="gemini-2.0-flash",
+    paths, doc_type="auto", model="gemini-2.5-flash",
     passes=1, workers=3, output_dir="output_batch",
     compare=False, fast=False, chunk_size=3000, max_chars=50000,
 ):
@@ -407,7 +407,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("paths", nargs="+", help="PDF files or folders")
     parser.add_argument("--type", choices=["auto", "regulation", "quarterly"], default="auto")
-    parser.add_argument("--model", default="gemini-2.0-flash")
+    parser.add_argument("--model", default="gemini-2.5-flash")
     parser.add_argument("--passes", type=int, default=1)
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--output", default="output_batch")

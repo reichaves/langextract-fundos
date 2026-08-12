@@ -229,7 +229,7 @@ def build_report(result, pdf_path: str) -> dict:
 
 
 def extract_quarterly(
-    pdf_path, model="gemini-2.0-flash", passes=1, workers=3,
+    pdf_path, model="gemini-2.5-flash", passes=1, workers=3,
     output_dir="output", chunk_size=3000, max_chars=50000,
 ):
     """Extract structured data from a FIDC quarterly report PDF."""
@@ -347,7 +347,7 @@ if __name__ == "__main__":
         description="Extract data from FIDC quarterly reports with red flag detection",
     )
     parser.add_argument("pdf", help="Path to quarterly report PDF")
-    parser.add_argument("--model", default="gemini-2.0-flash")
+    parser.add_argument("--model", default="gemini-2.5-flash")
     parser.add_argument("--passes", type=int, default=1)
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--output", default="output")
