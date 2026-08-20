@@ -274,6 +274,11 @@ def extract_quarterly(
                 extraction_passes=passes,
                 max_workers=workers,
                 max_char_buffer=attempt["chunk"],
+                # Without this, langextract swallows chunk-level JSON parse
+                # errors (logs "Skipping chunk" and returns []), so the
+                # except block below never fires and the smaller-buffer
+                # retry never triggers.
+                resolver_params={"suppress_parse_errors": False},
                 **config,
             )
             break
