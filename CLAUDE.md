@@ -44,6 +44,13 @@ Four files, no packages:
 
 Gemini free tier = 15 requests/minute. Naively chunking a 250K-char PDF into 3K-char pieces means ~46 API calls, which blows through the limit and triggers slow retry/backoff. `utils.extract_pdf_text` avoids this by keeping only regulator-relevant sections before sending text to the LLM — see `SECTION_KEYWORDS` and `_extract_relevant_sections` in `utils.py`. That function splits Brazilian regulations by their standard numbered clause headers (e.g. `7. TAXA DE ADMINISTRAÇÃO`, per CVM Resolution 175/2022 structure), always keeps the first/last sections and any section matching keep-headers or content keywords, and drops/trims the rest. This is the single most load-bearing piece of logic in the repo — don't casually rewrite it without understanding why (see comments in `_extract_relevant_sections`).
 
+**Retry/checkpoint is layered, not redundant** (as of `langextract==1.6.0`, 2026-08-20):
+1. **Native per-chunk retry** (`GeminiLanguageModel._process_single_prompt`, upstream commit `3aab86c`) retries individual HTTP calls on 429/503/timeout — but only 3 attempts, 16s delay cap, and when exhausted it kills the *entire* parallel `infer()` batch (all chunks in that `lx.extract()` call), not just the failed one.
+2. **`utils.extract_with_backoff()`** wraps a whole `lx.extract()` call (one of the 3 prompt groups) with coarser backoff (5 attempts, 5s·2ⁿ) — this is the fallback for when native retry exhausts under sustained load (e.g. free-tier 15 RPM), which the 16s-cap native retry alone doesn't cover.
+3. **`utils.save_checkpoint()`** persists progress between the 3 group-level `lx.extract()` calls (A/B/C) that this repo's own script orchestrates — a layer upstream has no visibility into, since each group is a separate `extract()` invocation, not chunks within one.
+
+Upstream PR [#520](https://github.com/google/langextract/pull/520) (open, unmerged) would add `max_rpm` throttling + partial-chunk preservation *within* a single `extract()` call — useful, but doesn't remove the need for group-level checkpointing here even if merged. PR [#509](https://github.com/google/langextract/pull/509) (merged, already in 1.6.0) only forwards `max_output_tokens`/`top_p`/`top_k`; this repo doesn't set those yet. Re-check this comparison after #520 merges.
+
 CLI presets (`--fast`, default, `--max-chars`, `--no-filter`) all just tune `max_chars`/`chunk_size`/`workers` passed into this pipeline; they don't change the extraction logic itself.
 
 ### Multi-group extraction pattern
