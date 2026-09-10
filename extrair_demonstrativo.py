@@ -50,6 +50,28 @@ except ImportError:
     sys.exit(1)
 
 
+# Parse failures are identified by exception TYPE, not by message text. The
+# upstream wording of these messages is not a stable contract — google/langextract
+# PR #521 rewrites it — so substring matching silently stops retrying whenever
+# they reword. ResolverParsingError covers both parse and schema failures; a
+# smaller chunk is a reasonable second try for either.
+try:
+    from langextract.resolver import ResolverParsingError
+except ImportError:  # pragma: no cover - older langextract layout
+    ResolverParsingError = None
+
+
+def _is_parse_error(exc):
+    """True if exc is a chunk-level parse/schema failure worth a smaller chunk."""
+    if ResolverParsingError is not None:
+        return isinstance(exc, ResolverParsingError)
+    # Fallback for langextract versions that don't expose the exception type.
+    return any(t in str(exc) for t in (
+        "Failed to parse", "JSONDecodeError", "Expecting",
+        "Unterminated string", "Invalid control character",
+    ))
+
+
 # ============================================================
 # Prompt and few-shot example
 # ============================================================
@@ -283,14 +305,9 @@ def extract_quarterly(
             )
             break
         except Exception as e:
-            err_str = str(e)
-            is_json_error = any(t in err_str for t in [
-                "Failed to parse JSON", "JSONDecodeError", "Expecting",
-                "Unterminated string", "Invalid control character",
-            ])
-            if is_json_error and attempt != attempts[-1]:
+            if _is_parse_error(e) and attempt != attempts[-1]:
                 next_chunk = attempts[attempts.index(attempt) + 1]["chunk"]
-                print(f"   ⚠️  JSON parse error with chunk={attempt['chunk']}. "
+                print(f"   ⚠️  Parse error with chunk={attempt['chunk']}. "
                       f"Retrying with chunk={next_chunk}...\n")
                 continue
             else:
