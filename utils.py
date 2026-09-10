@@ -13,8 +13,10 @@ import json
 import os
 import random
 import re
+import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 import pdfplumber
 import langextract as lx
@@ -89,17 +91,69 @@ def is_rate_limit_error(exc: Exception) -> bool:
     return any(marker.lower() in err_str.lower() for marker in _RATE_LIMIT_MARKERS)
 
 
-def extract_with_backoff(*, max_retries: int = 5, base_delay: float = 5.0, **extract_kwargs):
+# Ceiling for a single lx.extract() call. Observed failure mode: with several
+# workers, LangExtract's pool can stop making progress and never return — no
+# CPU, no output, no exception. The main thread blocks in a non-interruptible
+# join, so even SIGINT is ignored and only SIGTERM ends the process. Neither the
+# backoff below nor the callers' chunk-size retry helps, because both only react
+# to exceptions. This bound turns that silent hang into a TimeoutError the
+# caller can handle (fail the group, checkpoint, move on).
+EXTRACT_TIMEOUT_SECS = 900.0
+
+
+def _extract_with_timeout(timeout: Optional[float], **extract_kwargs):
+    """Run lx.extract() in a daemon thread, raising TimeoutError if it stalls.
+
+    The stuck thread cannot be killed, so it is left running as a daemon: it
+    holds memory until the process exits but does not prevent that exit.
+    """
+    if not timeout:
+        return lx.extract(**extract_kwargs)
+
+    box = {}
+
+    def run():
+        try:
+            box["value"] = lx.extract(**extract_kwargs)
+        except BaseException as e:  # noqa: BLE001 - re-raised in the caller
+            box["error"] = e
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout)
+
+    if thread.is_alive():
+        raise TimeoutError(
+            f"lx.extract() made no progress for {timeout:.0f}s "
+            f"(max_char_buffer={extract_kwargs.get('max_char_buffer')}, "
+            f"max_workers={extract_kwargs.get('max_workers')}). "
+            "Retry with --workers 1 if this repeats."
+        )
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+def extract_with_backoff(
+    *,
+    max_retries: int = 5,
+    base_delay: float = 5.0,
+    timeout: Optional[float] = EXTRACT_TIMEOUT_SECS,
+    **extract_kwargs,
+):
     """
     Call lx.extract() with exponential backoff + jitter on rate-limit errors.
 
     Non-rate-limit errors (e.g. JSON parse failures) are re-raised immediately so
     callers can keep handling those with their own chunk-size retry logic.
+
+    Each attempt is bounded by `timeout` seconds (None disables the bound); a
+    stalled call raises TimeoutError instead of hanging forever.
     """
     attempt = 0
     while True:
         try:
-            return lx.extract(**extract_kwargs)
+            return _extract_with_timeout(timeout, **extract_kwargs)
         except Exception as e:
             if not is_rate_limit_error(e) or attempt >= max_retries:
                 raise
