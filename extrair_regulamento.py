@@ -80,11 +80,11 @@ def _is_parse_error(exc):
 
 
 # ============================================================
-# Prompts and examples — SPLIT INTO 2 GROUPS
+# Prompts and examples — SPLIT INTO 3 GROUPS
 # ============================================================
 #
 # WHY: With 22 entity types, the model generates ~22K+ chars of JSON per chunk,
-# which gets truncated (Unterminated string error). Splitting into 2 groups
+# which gets truncated (Unterminated string error). Splitting into 3 groups
 # of ~11 entities each cuts JSON output in half, avoiding truncation.
 
 # --- GROUP A: Identification + Service Providers + Fees ---
@@ -299,28 +299,30 @@ def extract_regulation(
     # 2. Configure model
     config = configure_model(model)
 
-    # 3. Show extraction plan (3 groups = 3× the API calls)
-    print(f"\n2️⃣  Extraction plan (3 entity groups):")
+    groups = [
+        {"name": "A (ID + Providers)", "prompt": PROMPT_GROUP_A, "example": EXAMPLE_GROUP_A},
+        {"name": "B (Fees + Structure)", "prompt": PROMPT_GROUP_B, "example": EXAMPLE_GROUP_B},
+        {"name": "C (Policy + Risk + Events)", "prompt": PROMPT_GROUP_C, "example": EXAMPLE_GROUP_C},
+    ]
+
+    # 3. Show extraction plan (each group is a separate pass over the text,
+    #    so API calls scale with the number of groups)
+    n_groups = len(groups)
+    print(f"\n2️⃣  Extraction plan ({n_groups} entity groups):")
     num_chunks = max(1, len(text) // chunk_size)
-    total_calls = num_chunks * passes * 3  # ×3 for 3 groups
+    total_calls = num_chunks * passes * n_groups
     effective = min(workers, 10, num_chunks)
     secs = (total_calls * 20) / max(1, effective)
     m, s = divmod(int(secs), 60)
     est = f"~{m}min {s}s" if m > 0 else f"~{s}s"
     print(f"   📊 Text: {len(text):,} chars")
     print(f"   📦 Chunks: ~{num_chunks} per group (buffer: {chunk_size:,} chars)")
-    print(f"   🔄 API calls: ~{total_calls} (3 groups × {num_chunks} chunks × {passes} pass{'es' if passes > 1 else ''})")
+    print(f"   🔄 API calls: ~{total_calls} ({n_groups} groups × {num_chunks} chunks × {passes} pass{'es' if passes > 1 else ''})")
     print(f"   👷 Workers: {effective}")
     print(f"   ⏱️  Estimate: {est}")
 
-    # 4. Run extraction in 2 groups (smaller JSON = no truncation)
-    print(f"\n3️⃣  Running extraction (2 groups)...\n")
-
-    groups = [
-        {"name": "A (ID + Providers)", "prompt": PROMPT_GROUP_A, "example": EXAMPLE_GROUP_A},
-        {"name": "B (Fees + Structure)", "prompt": PROMPT_GROUP_B, "example": EXAMPLE_GROUP_B},
-        {"name": "C (Policy + Risk + Events)", "prompt": PROMPT_GROUP_C, "example": EXAMPLE_GROUP_C},
-    ]
+    # 4. Run extraction one group at a time (smaller JSON = no truncation)
+    print(f"\n3️⃣  Running extraction ({n_groups} groups)...\n")
 
     all_extractions = []
     failed_groups = []
