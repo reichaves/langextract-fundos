@@ -2,6 +2,7 @@
 utils.py — Shared utilities for LangExtract fund document extraction.
 
 Provides:
+- UTF-8 console output on import (Windows legacy codepages break the emoji below)
 - API key configuration (with .env support)
 - PDF text extraction with smart reduction for regulatory documents
 - LLM model configuration (Gemini, OpenAI, Ollama)
@@ -13,6 +14,7 @@ import json
 import os
 import random
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -21,6 +23,40 @@ from typing import Optional
 import pdfplumber
 import langextract as lx
 from dotenv import load_dotenv
+
+
+# ============================================================
+# Console encoding
+# ============================================================
+
+
+def _force_utf8_console():
+    """
+    Make stdout/stderr able to print the emoji these scripts use.
+
+    On Windows the console defaults to a legacy codepage (cp1252 here), and the
+    first emoji in any script's output raises UnicodeEncodeError, killing the
+    run before it does any work. Every entry point imports this module, so
+    reconfiguring once here covers all of them.
+
+    errors="replace" is deliberate: a console that genuinely cannot render a
+    glyph should print a placeholder, never abort an extraction that may have
+    cost minutes of API quota.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        # Already UTF-8 (Linux, macOS, or PYTHONIOENCODING set): leave it alone.
+        if (getattr(stream, "encoding", "") or "").lower().replace("-", "") == "utf8":
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            # Not a reconfigurable text stream — e.g. redirected to a pipe by a
+            # test harness, or already detached. Printing degrades to whatever
+            # the stream supports, which is survivable; a crash here would not.
+            pass
+
+
+_force_utf8_console()
 
 
 # ============================================================
