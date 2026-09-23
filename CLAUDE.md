@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Structured entity extraction from Brazilian investment fund regulatory PDFs (filed with **CVM**, the Brazilian SEC equivalent, via the **B3** exchange's Fundos.NET system), using Google's [LangExtract](https://github.com/google/langextract) library. Extractions are source-grounded (every value links back to an exact text span in the original PDF). Built for investigative journalism use (e.g. red-flag detection in FIDC quarterly reports).
 
-Despite the README describing a `scripts/` subdirectory, all scripts currently live at the repo root.
+Despite the README describing a `scripts/` subdirectory, all scripts currently live at the repo root. `docs/` holds prose only — currently the source of record for upstream issue [#545](https://github.com/google/langextract/issues/545).
 
 ## Setup and commands
 
@@ -33,11 +33,12 @@ No test suite beyond `test_config.py` (checks API key presence). No linter confi
 
 ## Architecture
 
-Four files, no packages:
+Five files, no packages:
 
 - **`utils.py`** — shared foundation for everything: `.env`/API key loading (`load_config`), model config dispatch (`configure_model` — routes `gemini-*`, `gpt-*`, `ollama:*` model strings to the right LangExtract backend), PDF-to-text extraction with smart section reduction (`extract_pdf_text`), and HTML report generation.
 - **`extrair_regulamento.py`** — extracts from fund regulations (Regulamento).
 - **`extrair_demonstrativo.py`** — extracts from FIDC quarterly reports (Demonstrativo Trimestral), plus `classify_alerts()` for automatic red-flag detection (backing inconsistencies, lawsuits, financial disruptions, etc.).
+- **`comparar_versoes.py`** — A/B harness for langextract/model swaps; not part of the extraction pipeline (see "Evaluating a model or library swap" below).
 - **`extrair_lote.py`** — batch driver: `detect_document_type`/`detect_type_from_filename` route each PDF to the right extractor, then `generate_comparative_report` merges results across a directory.
 
 ### The core problem this codebase solves: rate limits
