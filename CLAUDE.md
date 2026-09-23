@@ -51,6 +51,22 @@ Gemini free tier = 15 requests/minute. Naively chunking a 250K-char PDF into 3K-
 
 Upstream will not close these gaps for you. PR [#520](https://github.com/google/langextract/pull/520) (`max_rpm` throttling + partial-chunk preservation *within* a single `extract()` call) was **closed unmerged** on 2026-09-20 — so layers 2 and 3 above are permanent, not a stopgap waiting on upstream. PR [#509](https://github.com/google/langextract/pull/509) (merged, already in 1.6.0) only forwards `max_output_tokens`/`top_p`/`top_k`; this repo doesn't set those yet. PR [#521](https://github.com/google/langextract/pull/521) (merged 2026-09-20, *after* the v1.7.0 cut, so not in any release yet) reworded the resolver's silent-chunk-drop warning and added a `Note:` to `extract()`'s docstring naming `ResolverParsingError` as the stable contract — that type, not the message text, is what this repo matches on (`_is_parse_error` in both extractors). Issue [#358](https://github.com/google/langextract/issues/358), the original report behind all of the above, was closed 2026-09-20 as too broad; the maintainer asked for narrow follow-up issues naming a concrete example and provider. Relevance-aware chunking — what `_extract_relevant_sections` does here — is the one item from #358 never addressed upstream and still open for such an issue.
 
+### Evaluating a model or library swap
+
+`comparar_versoes.py` is the A/B harness for changing langextract versions or models. It exists because `output/<stem>_report.json` is a lossy projection — `entities` is `dict[class -> list[str]]`, so `char_interval` and `alignment_status` are discarded and an alignment regression is invisible in it. The harness runs the same production path (`extract_with_backoff` -> `lx.extract`) but keeps the full `Extraction` objects, and pins `temperature=0.0` (production leaves it at the provider default).
+
+```bash
+python comparar_versoes.py run <pdf> --label smoke --groups A --max-chars 6000   # ~2 calls, validates the dump
+python comparar_versoes.py run <pdf> --label v1_7_0_a                            # ~48 calls
+python comparar_versoes.py diff output/ab/v1_7_0_a.json output/ab/v1_7_0_b.json
+```
+
+**Always run two arms of the SAME configuration first.** Measured on 2026-09-23, two identical runs on 1.6.0 (same PDF, same reduced-text sha256, `temperature=0.0`) gave 58 vs 25 entities, 14/23 vs 7/23 class coverage, and one of them lost group C entirely to a `ResolverParsingError` that exhausted all three chunk sizes. The run-to-run noise floor is larger than any version effect seen so far, so a single arm per version proves nothing. `diff` refuses to call a comparison trustworthy when an arm has a failed group or a different input hash.
+
+The 1.6.0 -> 1.7.0 evaluation that motivated this: every cross-version delta landed inside the same-version noise band, so `requirements.txt` moved to `>=1.7.0` on "no detectable regression", not on measured improvement. Upstream PR #485's fuzzy->exact alignment shift is visible in the right direction but is not separable from noise at n=2. The predicted PR #534 hazard — a truncation surfacing as `InferenceRuntimeError`, which `_is_parse_error` does not match, silently disabling the chunk-halving retry — did **not** occur in any 1.7.0 arm; every failure observed was a correctly typed `ResolverParsingError`. That is two runs' worth of absence, not proof, so re-check it if groups start failing without the retry chain firing.
+
+**Known data-quality issue this surfaced (unfixed):** group C returns `""` and the literal string `"null"` for classes it cannot find — 19 of 58 extractions in one arm. These flow into `report["entities"]` and into the HTML a journalist reads, as if they were extracted values. `comparar_versoes.PLACEHOLDER_TEXTS` treats them as blanks for measurement purposes, but nothing filters them out of the actual reports.
+
 CLI presets (`--fast`, default, `--max-chars`, `--no-filter`) all just tune `max_chars`/`chunk_size`/`workers` passed into this pipeline; they don't change the extraction logic itself.
 
 ### Multi-group extraction pattern
