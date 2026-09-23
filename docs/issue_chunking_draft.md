@@ -1,15 +1,14 @@
-# Draft: relevance-aware chunking request for google/langextract
+# Relevance-aware chunking request for google/langextract (filed as #545)
 
-Unpublished draft for an upstream feature request, kept here so the numbers and
-framing survive outside a chat session. It follows up on
+Filed 2026-09-23 as
+[google/langextract#545](https://github.com/google/langextract/issues/545).
+Kept here as the source of record for the figures and framing.
+
+It follows up on
 [google/langextract#358](https://github.com/google/langextract/issues/358),
 which was closed 2026-09-20 as too broad, with the maintainer asking for focused
 issues naming a concrete example and provider. Relevance-aware chunking is the
 only item from #358 never addressed upstream.
-
-To file it: <https://github.com/google/langextract/issues/new>, **Feature
-Request** template — the body below already matches its required sections, and
-the template applies the `enhancement` and `needs triage` labels automatically.
 
 Figures verified 2026-09-23 against `exemplo/62941946000100-REG12082026V01-001284583.pdf`
 at `max_char_buffer=3000`: 159,629 → 50,043 characters (68.7% reduction).
